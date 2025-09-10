@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tic-Tac-Toe — Scroll Scrubbed, Simplified</title>
+  <style>
+    :root{
+      --box: 4px;
+      --line: 12px;
+      --cell: 64px;
+      --mark-scale: 0.75;
+      --o-scale: 0.71;
+
+      /* Scroll timeline + tracks (0..1) */
+      --t: 0;
+      --pH: 0;  /* horizontal merge progress */
+      --pV: 0;  /* vertical   merge progress */
+
+      /* How long the scrub takes (increase if you want more distance) */
+      --scrub-height: 250vh;
+    }
+
+    html, body { height: 100%; }
+    body{
+      margin:0;
+      background:#000;
+      color:#fff;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      overflow-y:auto;
+    }
+
+    .viewport{
+      position:fixed; inset:0;
+      display:grid; place-items:center;
+      pointer-events:none;
+    }
+    .frame{ pointer-events:auto; }
+
+    /* 3×3 board */
+    .board{
+      width: calc(var(--cell) * 3);
+      height: calc(var(--cell) * 3);
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      position:relative;
+    }
+
+    /* A single square (always outlined) */
+    .cell{
+      position:relative;
+      display:grid; place-items:center;
+
+      /* Outline perimeter */
+      outline: var(--box) solid rgba(255 255 255 / 1);
+      outline-offset: calc(var(--box) / -2);
+      box-sizing: border-box;
+
+      /* Scroll-driven motion (no CSS transitions) */
+      transform:
+        translate(
+          calc(var(--x-shift) * var(--pH)),
+          calc(var(--y-shift) * var(--pV))
+        );
+      will-change: transform;
+
+      /* Per-cell shift targets (filled via nth-child) */
+      --x-shift: 0px;
+      --y-shift: 0px;
+    }
+
+    /* Marks */
+    .cell.mark-x::before,
+    .cell.mark-x::after{
+      content:"";
+      position:absolute;
+      width: calc(var(--cell) * var(--mark-scale));
+      height: var(--line);
+      background:#fff;
+    }
+    .cell.mark-x::before{ transform: rotate(45deg); }
+    .cell.mark-x::after{  transform: rotate(-45deg); }
+
+    .cell.mark-o::before{
+      content:"";
+      position:absolute;
+      width: calc(var(--cell) * var(--o-scale));
+      height: calc(var(--cell) * var(--o-scale));
+      border: var(--line) solid #fff;
+      border-radius:50%;
+      box-sizing: border-box;
+    }
+
+    /* Final layout recipe (same as before):
+       - Top row slides left 3 cells and down 1 cell
+       - Middle row stays
+       - Bottom row slides right 3 cells and up 1 cell
+       That yields a single 1×9 row in row-major order. */
+    .board .cell:nth-child(1),
+    .board .cell:nth-child(2),
+    .board .cell:nth-child(3){
+      --x-shift: calc(-3 * var(--cell));
+      --y-shift: var(--cell);
+    }
+    .board .cell:nth-child(4),
+    .board .cell:nth-child(5),
+    .board .cell:nth-child(6){
+      --x-shift: 0px;
+      --y-shift: 0px;
+    }
+    .board .cell:nth-child(7),
+    .board .cell:nth-child(8),
+    .board .cell:nth-child(9){
+      --x-shift: calc(3 * var(--cell));
+      --y-shift: calc(-1 * var(--cell));
+    }
+
+    /* The element that defines how long you can scrub */
+    .scrub-zone{
+      height: var(--scrub-height);
+    }
+  </style>
+</head>
+<body>
+  <section class="viewport">
+    <div class="frame">
+      <div class="board" role="img" aria-label="Tic-Tac-Toe board; X top-left and bottom-right; O center-right.">
+        <!-- 9 squares (empty, X, or O) -->
+        <div class="cell mark-x" aria-hidden="true"></div>
+        <div class="cell" aria-hidden="true"></div>
+        <div class="cell" aria-hidden="true"></div>
+
+        <div class="cell" aria-hidden="true"></div>
+        <div class="cell" aria-hidden="true"></div>
+        <div class="cell mark-o" aria-hidden="true"></div>
+
+        <div class="cell" aria-hidden="true"></div>
+        <div class="cell" aria-hidden="true"></div>
+        <div class="cell mark-x" aria-hidden="true"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scroll through this to drive the whole animation -->
+  <div id="scrub" class="scrub-zone" aria-hidden="true"></div>
+
+  <script>
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+    // Gentle ease for cleaner motion
+    function smoothstep(x, a, b){
+      const t = clamp01((x - a) / (b - a));
+      return t * t * (3 - 2 * t);
+    }
+
+    function updateFromScroll(){
+      const zone = document.getElementById('scrub');
+      const rect = zone.getBoundingClientRect();
+      const vh = window.innerHeight || 1;
+
+      /* Progress mapping that uses the ENTIRE zone:
+         When the top of the zone is exactly at the bottom of the viewport => t = 0
+         When the bottom of the zone is exactly at the top   of the viewport => t = 1
+         This yields full-range scrubbing no matter the zone height. */
+      const total = vh + rect.height;                 // travel span
+      const passed = vh - rect.top;                   // how much has crossed into view
+      const t = clamp01(passed / total);
+
+      // Phase timings across [0..1] (use more of the track if you want)
+      const pH = smoothstep(t, 0.30, 0.60);  // horizontal merge from 15% → 30%
+      const pV = smoothstep(t, 0.60, 0.70);  // vertical   merge from 30% → 35%
+
+      const root = document.documentElement.style;
+      root.setProperty('--t',  t.toFixed(4));
+      root.setProperty('--pH', pH.toFixed(4));
+      root.setProperty('--pV', pV.toFixed(4));
+    }
+
+    window.addEventListener('scroll', updateFromScroll, { passive: true });
+    window.addEventListener('resize', updateFromScroll);
+    updateFromScroll();
+  </script>
+</body>
+</html>
